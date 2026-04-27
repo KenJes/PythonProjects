@@ -8,6 +8,7 @@ OPERACIONES = [
     ("max_cuadrado",  lambda a, b: max(a, b) * max(a, b)),
     ("prod_x_suma",   lambda a, b: (a * b) * (a + b)),
     ("diferencia+1",  lambda a, b: abs(a - b) + 1),
+    ("inv_digit",     lambda a, b: int(str(a)[::-1]) + int(str(b)[::-1])),
 ]
 MAX_HIJOS_PAR = len(OPERACIONES)
 
@@ -27,6 +28,17 @@ print("  3 - Torneo       (enfrentamientos aleatorios de 3)")
 print("  4 - Posicional   (primeros N en la lista)")
 print("  5 - Aleatorio    (N al azar)")
 mecanismo = int(input("Elige mecanismo [1-5]                   : "))
+
+print("\nTipo de mutación a aplicar:")
+print("  1 - Invertir dígitos")
+print("  2 - Incrementar en 5")
+print("  3 - Decrementar en 5")
+print("  4 - Agregar un dígito '0' al final")
+print("  5 - Eliminar el último dígito")
+print("  6 - Duplicar el número")
+print("  7 - Dividir el número entre 2 (redondeando hacia abajo)")
+print("  8 - Reemplazar el número por la suma de sus dígitos")
+tipo_mutacion = int(input("Elige tipo de mutación [1-8]            : "))
 
 # Clamp para no pedir más operaciones de las que existen
 n_hijos_par = min(n_hijos_par, MAX_HIJOS_PAR)
@@ -86,11 +98,26 @@ while maximo < objetivo:
                 hijos.append(resultado)
     print(f"Hijos (crossover): {hijos}")
 
-    # Mutación dinámica: invertir dígitos en n_mutaciones individuos aleatorios
+    # Mutación dinámica: aplicar tipo_mutacion a n_mutaciones individuos aleatorios
     indices_a_mutar = random.sample(range(len(hijos)), min(n_mutaciones, len(hijos)))
     for idx in indices_a_mutar:
         antes = hijos[idx]
-        hijos[idx] = int(str(hijos[idx])[::-1])
+        if tipo_mutacion == 1:
+            hijos[idx] = int(str(hijos[idx])[::-1])
+        elif tipo_mutacion == 2:
+            hijos[idx] += 5
+        elif tipo_mutacion == 3:
+            hijos[idx] -= 5
+        elif tipo_mutacion == 4:
+            hijos[idx] = int(str(hijos[idx]) + "0")
+        elif tipo_mutacion == 5:
+            hijos[idx] = int(str(hijos[idx])[:-1]) if len(str(hijos[idx])) > 1 else 0
+        elif tipo_mutacion == 6:
+            hijos[idx] *= 2
+        elif tipo_mutacion == 7:
+            hijos[idx] //= 2
+        elif tipo_mutacion == 8:
+            hijos[idx] = sum(int(d) for d in str(hijos[idx]))
         print(f"  Mutación índice {idx}: {antes} → {hijos[idx]}")
 
     print(f"Hijos (tras mutación): {hijos}")
