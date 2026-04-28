@@ -4,7 +4,7 @@ import random
 individuos=[8,3,2,7,1,6,3,4,10,3]
 print(individuos)
 
-padres = (individuos[:5])
+padres = (individuos[:10])
 print(padres)
 
 hijos = []
