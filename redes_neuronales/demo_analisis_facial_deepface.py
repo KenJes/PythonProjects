@@ -319,7 +319,7 @@ def demo_represent():
 
     for i, rostro in enumerate(resultados):
         embedding = rostro["embedding"]
-        modelo = rostro["model"]
+        modelo = rostro.get("model", "VGG-Face")
 
         print(f"\n--- Rostro {i + 1} ---")
         print(f"  Modelo: {modelo}")
@@ -416,10 +416,29 @@ def demo_realtime():
         print("ERROR: No se pudo abrir la cámara.")
         return
 
+    GENERO_ES = {"Man": "Hombre", "Woman": "Mujer"}
+    EMOCION_ES = {
+        "happy": "Feliz",
+        "sad": "Triste",
+        "angry": "Enojado",
+        "surprise": "Sorpresa",
+        "fear": "Miedo",
+        "disgust": "Disgusto",
+        "neutral": "Neutral",
+    }
+    RAZA_ES = {
+        "asian": "Asiatico",
+        "indian": "Indio",
+        "black": "Afrodescendiente",
+        "white": "Caucasico",
+        "middle eastern": "Oriente Medio",
+        "latino hispanic": "Latino",
+    }
+
     print("Cámara abierta — ESC para salir")
     frame_count = 0
-    info_text = "Analizando..."
-    region = None
+    analizado = False
+    rostros_detectados = []  # lista de (region_dict, linea1_str, linea2_str)
 
     while True:
         ret, frame = cap.read()
@@ -430,31 +449,43 @@ def demo_realtime():
 
         # Analizar cada 30 frames
         if frame_count % 30 == 1:
+            analizado = True
             try:
                 resultados = DeepFace.analyze(
                     img_path=frame,
-                    actions=["age", "gender", "emotion"],
+                    actions=["age", "gender", "emotion", "race"],
                     enforce_detection=False,
                     silent=True,
                 )
-                r = resultados[0]
-                edad = r["age"]
-                genero = r["dominant_gender"]
-                emocion = r["dominant_emotion"]
-                region = r["region"]
-                info_text = f"{genero}, {edad} anios, {emocion}"
+                rostros_detectados = []
+                for r in resultados:
+                    genero_es = GENERO_ES.get(r["dominant_gender"], r["dominant_gender"])
+                    emocion_es = EMOCION_ES.get(r["dominant_emotion"], r["dominant_emotion"])
+                    raza_es = RAZA_ES.get(r["dominant_race"], r["dominant_race"])
+                    pct_raza = r["race"][r["dominant_race"]]
+                    linea1 = f"{genero_es}, {r['age']} anos, {emocion_es}"
+                    linea2 = f"Etnia: {raza_es} ({pct_raza:.0f}%)"
+                    rostros_detectados.append((r["region"], linea1, linea2))
             except Exception:
-                info_text = "Sin deteccion"
-                region = None
+                rostros_detectados = []
 
-        # Dibujar bounding box
-        if region and region["w"] > 0:
-            x, y, w, h = region["x"], region["y"], region["w"], region["h"]
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(frame, info_text, (x, y - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        # Dibujar resultados
+        if not analizado:
+            cv2.putText(frame, "Analizando...", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        elif rostros_detectados:
+            for reg, linea1, linea2 in rostros_detectados:
+                if reg.get("w", 0) > 0 and reg.get("h", 0) > 0:
+                    x, y, w, h = reg["x"], reg["y"], reg["w"], reg["h"]
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    y1 = max(y - 28, 20)
+                    y2 = max(y - 6, 42)
+                    cv2.putText(frame, linea1, (x, y1),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 255, 0), 2)
+                    cv2.putText(frame, linea2, (x, y2),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 200, 255), 2)
         else:
-            cv2.putText(frame, info_text, (10, 30),
+            cv2.putText(frame, "Sin deteccion", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
         cv2.imshow("DeepFace - Tiempo Real (ESC para salir)", frame)
@@ -464,6 +495,125 @@ def demo_realtime():
     cap.release()
     cv2.destroyAllWindows()
     print("Cámara cerrada.")
+
+
+# ==================== 8. INTERCAMBIO DE ROSTROS ====================
+def _intercambiar_rostro(img_destino, reg_destino, img_fuente, reg_fuente):
+    """
+    Pega el rostro de img_fuente (reg_fuente) sobre img_destino (reg_destino)
+    usando seamless cloning para una mezcla natural.
+    """
+    sx, sy = reg_fuente["x"], reg_fuente["y"]
+    sw, sh = reg_fuente["w"], reg_fuente["h"]
+    dx, dy = reg_destino["x"], reg_destino["y"]
+    dw, dh = reg_destino["w"], reg_destino["h"]
+
+    # Recortar y redimensionar el rostro fuente al tamaño del destino
+    cara_fuente = img_fuente[sy:sy + sh, sx:sx + sw]
+    cara_redim = cv2.resize(cara_fuente, (dw, dh))
+
+    # Canvas: copia del destino con el rostro fuente en la posición destino
+    canvas = img_destino.copy()
+    canvas[dy:dy + dh, dx:dx + dw] = cara_redim
+
+    # Máscara elíptica sobre la región destino
+    mascara_local = np.zeros((dh, dw), dtype=np.uint8)
+    cv2.ellipse(
+        mascara_local,
+        (dw // 2, dh // 2),
+        (max(dw // 2 - 5, 1), max(dh // 2 - 5, 1)),
+        0, 0, 360, 255, -1,
+    )
+    mascara_full = np.zeros(img_destino.shape[:2], dtype=np.uint8)
+    mascara_full[dy:dy + dh, dx:dx + dw] = mascara_local
+
+    centro = (dx + dw // 2, dy + dh // 2)
+
+    try:
+        resultado = cv2.seamlessClone(canvas, img_destino, mascara_full, centro, cv2.NORMAL_CLONE)
+    except cv2.error:
+        # Fallback: pegado directo si seamlessClone falla (región muy pequeña)
+        resultado = canvas
+    return resultado
+
+
+def demo_face_swap():
+    """
+    Captura o selecciona dos imágenes con un rostro cada una y genera:
+      - Rostro 3: cuerpo de imagen 1 con el rostro de imagen 2
+      - Rostro 4: cuerpo de imagen 2 con el rostro de imagen 1
+    Usa DeepFace.extract_faces() para detectar regiones y cv2.seamlessClone para mezclar.
+    """
+    print("\n" + "=" * 60)
+    print("8. Intercambio de rostros (Face Swap)")
+    print("=" * 60)
+
+    ruta1 = obtener_imagen("Imagen 1 - Rostro base A")
+    if not ruta1:
+        print("No se seleccionó imagen.")
+        return
+
+    ruta2 = obtener_imagen("Imagen 2 - Rostro base B")
+    if not ruta2:
+        print("No se seleccionó imagen.")
+        return
+
+    print("Detectando rostros...")
+
+    img1 = cv2.imread(ruta1)
+    img2 = cv2.imread(ruta2)
+
+    try:
+        rostros1 = DeepFace.extract_faces(img_path=ruta1, enforce_detection=False)
+        rostros2 = DeepFace.extract_faces(img_path=ruta2, enforce_detection=False)
+    except Exception as e:
+        print(f"Error al detectar rostros: {e}")
+        return
+
+    if not rostros1 or not rostros2:
+        print("No se detectaron rostros en una o ambas imágenes.")
+        return
+
+    reg1 = rostros1[0]["facial_area"]
+    reg2 = rostros2[0]["facial_area"]
+
+    print(f"  Rostro 1 detectado en: x={reg1['x']}, y={reg1['y']}, w={reg1['w']}, h={reg1['h']}")
+    print(f"  Rostro 2 detectado en: x={reg2['x']}, y={reg2['y']}, w={reg2['w']}, h={reg2['h']}")
+
+    print("Generando intercambio de rostros...")
+    rostro3 = _intercambiar_rostro(img1, reg1, img2, reg2)  # img1 con cara de img2
+    rostro4 = _intercambiar_rostro(img2, reg2, img1, reg1)  # img2 con cara de img1
+
+    # Guardar resultados
+    ruta3 = os.path.join(CAPTURAS_PATH, "rostro_swap_3.jpg")
+    ruta4 = os.path.join(CAPTURAS_PATH, "rostro_swap_4.jpg")
+    cv2.imwrite(ruta3, rostro3)
+    cv2.imwrite(ruta4, rostro4)
+    print(f"\nRostro 3 guardado en: {ruta3}")
+    print(f"Rostro 4 guardado en: {ruta4}")
+
+    # Visualización 2×2
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    axes[0, 0].imshow(cv2.cvtColor(img1, cv2.COLOR_BGR2RGB))
+    axes[0, 0].set_title(f"Original A\n{os.path.basename(ruta1)}", fontsize=10)
+    axes[0, 0].axis("off")
+
+    axes[0, 1].imshow(cv2.cvtColor(img2, cv2.COLOR_BGR2RGB))
+    axes[0, 1].set_title(f"Original B\n{os.path.basename(ruta2)}", fontsize=10)
+    axes[0, 1].axis("off")
+
+    axes[1, 0].imshow(cv2.cvtColor(rostro3, cv2.COLOR_BGR2RGB))
+    axes[1, 0].set_title("Rostro 3: Cuerpo A + Cara B", fontsize=10, color="#27ae60")
+    axes[1, 0].axis("off")
+
+    axes[1, 1].imshow(cv2.cvtColor(rostro4, cv2.COLOR_BGR2RGB))
+    axes[1, 1].set_title("Rostro 4: Cuerpo B + Cara A", fontsize=10, color="#2980b9")
+    axes[1, 1].axis("off")
+
+    plt.suptitle("Face Swap — Intercambio de rostros", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    plt.show()
 
 
 # ==================== MENÚ PRINCIPAL ====================
@@ -479,6 +629,7 @@ def main():
         print("  5. extract_faces()→ Detectar y recortar rostros")
         print("  6. Tiempo real    → Análisis en vivo con cámara")
         print("  7. Ejecutar TODOS los demos")
+        print("  8. face_swap()    → Intercambiar rostros entre dos imágenes")
         print("  0. Salir")
         print("-" * 60)
 
@@ -503,6 +654,8 @@ def main():
             demo_represent()
             demo_extract_faces()
             demo_realtime()
+        elif opcion == "8":
+            demo_face_swap()
         elif opcion == "0":
             print("¡Hasta luego!")
             break
